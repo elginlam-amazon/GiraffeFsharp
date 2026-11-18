@@ -1,0 +1,1108 @@
+# 📊 Executive Report: Giraffe Upgrade to .NET 10  
+  
+## 1. 🧭 Executive Summary  
+Giraffe is an F# web framework built on ASP.NET Core. This upgrade moved the solution's seven projects from .NET 6, 7, 8 and 9 to **`net10.0`**: the Giraffe library, five sample apps and the xUnit test project. Kiro CLI did all of the work, because Upgrade Assistant skips F# projects. The automated run took about **4 minutes** (20:32 to 20:36 UTC). Every project builds with **0 errors and 0 warnings**, and **454 of 454 tests pass** on .NET 10 with none skipped. The upgrade needed no rewrites of application logic. It took one compile fix, one security-driven package bump and the removal of code branches for frameworks that are no longer targeted.  
+  
+- ✅ **Outcome:** success (`code_upgrade: success` in `progress.json`)  
+- 🏗️ **Build:** 7 of 7 projects build cleanly. The library still treats warnings as errors.  
+- 🧪 **Tests:** 454 passed, 0 failed, 0 skipped  
+- ⚠️ **Baseline:** the pre-upgrade test run executed 0 tests because the .NET 9 runtime is not installed on the build host. There is no before/after test comparison, so the post-upgrade run is the only test evidence.  
+  
+## 2. 🧩 Application Changes  
+- 📦 **Giraffe library** (`src/Giraffe`): was `net6.0;net7.0;net8.0;net9.0`, now `net10.0` only  
+- 🚀 **Samples** (GlobalRateLimiting, EndpointRoutingApp, NewtonsoftJson, RateLimiting, ResponseCachingApp): were `net8.0` or `net9.0`, now `net10.0`  
+- 🧪 **Tests** (`tests/Giraffe.Tests`): was `net8.0;net9.0;net10.0`, now `net10.0` only  
+- 🔒 **Security:** removed the transitive `Microsoft.Build.Tasks.Git` 8.0.0 dependency, which has a known moderate-severity advisory (GHSA-23fw-v26w-5fgq, NU1902)  
+- 🧹 **Cleanup:** deleted code branches for frameworks older than .NET 8 and .NET 10, which can no longer compile  
+- 🟰 **Behaviour unchanged:** routing, JSON/XML serialization, response caching, rate limiting and the markdown handlers work as before. Responses are byte-for-byte the same (the `text/markdown; charset=utf-8` content type is the same value).  
+- 🚫 **Not applicable:** the solution had no System.Web, EF6, WCF or Web.config code, so none of the .NET Framework migration steps applied.  
+  
+## 3. 🛠️ Tools Used  
+- ⚙️ **.NET SDK 10.0.404:** restore, build and `dotnet test` (Microsoft.Testing.Platform runner from `global.json`)  
+- 🔧 **Microsoft .NET Upgrade Assistant 1.0.518.26217:** worked out the upgrade order (the library first, then the six projects that reference it). It skipped every project because it supports C# and VB.NET only.  
+- 🤖 **Kiro CLI 2.35.1 with Claude Opus 5.5** (`claude-opus-5.5`, succeeded on the first attempt): converted the project files, fixed the build, ran the tests and wrote the reports  
+- 📚 **Migration knowledge base:** used `35-fsharp-migration.md` for the FSharp.Core pinning rules and `01-project-file-migration.md` for target framework handling  
+- 🗺️ **CodeKB:** an index of the pre-upgrade code, used to look up the markdown handlers, JSON serializer setup and endpoint routing before editing them  
+  
+## 4. 💻 Code Changes  
+- 📄 **`src/Giraffe/Giraffe.fsproj`**  
+  - 🎯 `<TargetFrameworks>net6.0;net7.0;net8.0;net9.0</TargetFrameworks>` became `<TargetFramework>net10.0</TargetFramework>`  
+  - ➖ Removed `System.Text.Json` 8.0.*, because the .NET 10 shared framework already provides it  
+  - ⬆️ Raised `Microsoft.SourceLink.GitHub` from 8.0.* to 10.0.*. This fixes the NU1902 vulnerability error, which failed the build as a warning-as-error.  
+  - 📌 Kept the `FSharp.Core` 6.0.0 pin, `DisableImplicitFSharpCoreReference` and the `<Compile Include>` order  
+- 📄 **Five sample `.fsproj` files:** target framework changed to `net10.0`  
+- 📄 **`tests/Giraffe.Tests/Giraffe.Tests.fsproj`:** now targets `net10.0` only. The three per-framework `Microsoft.AspNetCore.TestHost` references became one 10.0.* reference.  
+- 📝 **`src/Giraffe/Core.fs` (`markdown`) and `src/Giraffe/HttpContextExtensions.fs` (`WriteMarkdownAsync`):** removed the `#if NET8_0_OR_GREATER ... #else` branch. Both now always use `MediaTypeNames.Text.Markdown`.  
+- 🧪 **`tests/Giraffe.Tests/Helpers.fs`:** removed the pre-.NET 10 `WebHostBuilder`/`TestServer` branches from `createHost` and `makeRequest`. The tests keep the `HostBuilder` + `UseTestServer` setup they already used on .NET 10.  
+- ⏱️ **`samples/GlobalRateLimiting/Program.fs`:** `TimeSpan.FromSeconds(1)` became `TimeSpan.FromSeconds(int64 1)`. This fixes error FS0041, an ambiguous overload caused by the `int64` overloads that .NET 9 added. The RateLimiting sample already used this form.  
+- 📈 **Size of the change:** 11 files changed, 10 lines added, 41 removed  
+  
+## 5. ⏳ Time Savings Estimate  
+- 🧑‍💻 **Manual estimate: about 1 to 1.5 developer-days**  
+  - 🔍 About 2 hours to review seven project files, the conditional compilation and the package compatibility  
+  - 🐞 About 2 hours to diagnose the NU1902 advisory failure and the F# FS0041 overload ambiguity  
+  - 🧪 About 2 to 3 hours to build, run the tests and check the CI workflows  
+  - 📝 About 1 hour to document the decisions (whether to add `netstandard2.0`, the effect on NuGet consumers)  
+- 🤖 **Automated run:** about 4 minutes  
+- 💰 **Estimated saving:** about 90% or more of the hands-on effort. This scope is small and low-risk, so most of the saving is research and verification time rather than code edits.  
+  
+## 6. 🔜 Next Steps  
+- ✅ **Validation**  
+  - 🔁 Run `dotnet build -c Release` and `dotnet test -c Release` in CI. The pipeline already installs the 10.x SDK.  
+  - 🌐 Run each sample app locally (endpoint routing, rate limiting, response caching, Newtonsoft JSON) and spot-check its endpoints  
+  - 📦 Run `dotnet pack` on Giraffe and check the package: `lib/net10.0` only, the SourceLink metadata, and the README, icon and license files  
+  - 🔬 Run the F# analyzers target: `dotnet msbuild /t:AnalyzeFSharpProject src/Giraffe/Giraffe.fsproj`  
+- ⚠️ **Decisions needed**  
+  - 📢 Dropping .NET 6 to 9 from the Giraffe NuGet package is a **breaking change** for consumers on .NET 8 and 9 (.NET 8 is still LTS). To keep supporting them, use `net8.0;net9.0;net10.0` and restore the `#if` branches.  
+  - 🗒️ Record the framework change in `CHANGELOG.md` and `RELEASE_NOTES.md`  
+  - 🧱 No `netstandard2.0` target was added. Giraffe depends on the ASP.NET Core shared framework, which doesn't exist on `netstandard2.0`, and the package never targeted it before.  
+- 💡 **Recommended improvements**  
+  - 🧹 Remove the 8.x and 9.x SDKs from `.github/workflows/build-and-test.yml` and the other workflows if only `net10.0` stays  
+  - 🖥️ Install the .NET 9 runtime on the build host, or remove the need for it, so that future baseline test runs produce a real before/after comparison  
+  - 📌 Keep the `FSharp.Core` 6.0.0 pin for the published library. Raise it only when the code needs newer FSharp.Core APIs.  
+  - 🔄 Consider replacing the floating versions (`10.0.*`, `1.3.*`, `4.0.*`) with exact versions or central package management, so that builds are reproducible  
+
+## Kiro credit usage
+
+💳 Kiro CLI credits used: 11.62  
+Includes 1.16 for job setup (startup smoke test and knowledge-base indexing).  
+
+## Codebase index refresh
+
+- Outcome: Index current
+- Reason: Index current at 032ea9b6ff31396f1eac33af53234a5b1836106d.
+- Previously indexed commit: 032ea9b6ff31396f1eac33af53234a5b1836106d
+- Source commit at transformation start: 032ea9b6ff31396f1eac33af53234a5b1836106d
+- Duration: 0.0s
+
+## Requirements register refresh
+
+- Outcome: Refreshed
+- Duration: 3.9s
+
+## Feature Parity Verification
+
+- Requirements evaluated: 137
+- Satisfied: 137
+- Regressions: 0
+- Unverified: 0
+- Behaviour-judged (changed requirements): 39
+
+### Verdict coverage
+
+Of 137 requirement(s): 0 test-backed, 39 behaviour-judged, 98 unchanged-by-construction, 0 unverified.
+
+> **Test evidence.** No verdict is test-backed: this iteration's parity evidence carries no test results: the transformer that ran it did not report any.
+
+No regressions were detected; every requirement is satisfied.
+
+### Satisfied (137) — reasoning
+
+- **FR-handles-configuration-fo-232c0d54**: WHEN a caller invokes configureApp, the Program SHALL perform configureApp.
+  - Acceptance criteria:
+    - AC1: WHEN configureApp runs, the Program SHALL call UseGiraffe.
+    - AC2: WHEN configureApp completes normally, the Program SHALL return a value of type let.
+    - AC3: WHEN configureApp is invoked, the Program SHALL accept appBuilder of type IApplicationBuilder.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The configureApp implementations are byte-for-byte identical between BEFORE and AFTER across all samples, so behaviour is unchanged.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-configuration-fo-76c73b5b**: WHEN a caller invokes configureServices, the Program SHALL perform configureServices.
+  - Acceptance criteria:
+    - AC1: WHEN configureServices runs, the Program SHALL call AddGiraffe.
+    - AC2: WHEN configureServices completes normally, the Program SHALL return a value of type let.
+    - AC3: WHEN configureServices is invoked, the Program SHALL accept services of type IServiceCollection.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The configureServices implementations are functionally identical; the only difference is a cosmetic change (TimeSpan.FromSeconds(1) vs TimeSpan.FromSeconds(int64 1)), which does not alter observable behaviour.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-provide-serializer-capab-da8cf23d**: WHEN a caller invokes an operation of Serializer, the Serializer SHALL provide the operations DefaultSettings, SerializeToString, SerializeToBytes, SerializeToStreamAsync and Deserialize (+1 more).
+  - Acceptance criteria:
+    - AC1: The Serializer SHALL expose the operations DefaultSettings, SerializeToString, SerializeToBytes, SerializeToStreamAsync and Deserialize (+1 more).
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-serialize-bytes-b2923299**: WHEN a caller invokes SerializeToBytes, the Serializer SHALL serialize the x to bytes.
+  - Acceptance criteria:
+    - AC1: WHEN SerializeToBytes is invoked, the Serializer SHALL accept x as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-serialize-stream-async-271f2e8e**: WHEN a caller invokes SerializeToStreamAsync, the Serializer SHALL serialize the x to stream async.
+  - Acceptance criteria:
+    - AC1: WHEN SerializeToStreamAsync runs, the Serializer SHALL call Serialize.
+    - AC2: WHEN SerializeToStreamAsync is invoked, the Serializer SHALL accept x as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-serialize-string-a94b2482**: WHEN a caller invokes SerializeToString, the Serializer SHALL serialize the x to string.
+  - Acceptance criteria:
+    - AC1: WHEN SerializeToString is invoked, the Serializer SHALL accept x as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-d567edd8**: WHEN a caller invokes unauthorized, the RequestErrors SHALL return an HTTP 401 Unauthorized response.
+  - Acceptance criteria:
+    - AC1: WHEN unauthorized is invoked, the RequestErrors SHALL accept scheme, realm and x as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-a21a582c**: WHEN a caller invokes routef, the Routers SHALL parse the route format string and route the request to the matching handler.
+  - Acceptance criteria:
+    - AC1: WHEN routef runs, the Routers SHALL call routefWithExtensions.
+    - AC2: WHEN routef completes normally, the Routers SHALL return a value of type let.
+    - AC3: WHEN routef is invoked, the Routers SHALL accept path of type PrintfFormat<_, _, _, _, 'T>) (routeHandler: 'T -> HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-a4ef678f**: WHEN a caller invokes unprocessableEntity, the RequestErrors SHALL return an HTTP 422 Unprocessable Entity response.
+  - Acceptance criteria:
+    - AC1: WHEN unprocessableEntity is invoked, the RequestErrors SHALL accept x as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-application-buil-ed44feeb**: WHEN a caller invokes an operation of ApplicationBuilderExtensions, the ApplicationBuilderExtensions SHALL provide the operation UseGiraffe.
+  - Acceptance criteria:
+    - AC1: The ApplicationBuilderExtensions SHALL expose the operation UseGiraffe.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-preconditions-90ddb6ad**: WHEN a caller invokes ValidatePreconditions, the PreconditionExtensions SHALL validate the preconditions.
+  - Acceptance criteria:
+    - AC1: WHEN ValidatePreconditions runs, the PreconditionExtensions SHALL call CutOffMs.
+    - AC2: WHEN ValidatePreconditions is invoked, the PreconditionExtensions SHALL accept ctx, eTag, option and lastModified as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-add-giraffe-a03da0c9**: WHEN a caller invokes AddGiraffe, the ServiceCollectionExtensions SHALL register the Giraffe services in the service collection.
+  - Acceptance criteria:
+    - AC1: WHEN AddGiraffe completes normally, the ServiceCollectionExtensions SHALL return a value of type member.
+    - AC2: WHEN AddGiraffe is invoked, the ServiceCollectionExtensions SHALL accept svc of type IServiceCollection.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-add-metadata-6391e52e**: WHEN a caller invokes addMetadata, the Routers SHALL attach the specified metadata to the route.
+  - Acceptance criteria:
+    - AC1: WHEN addMetadata completes normally, the Routers SHALL return a value of type let.
+    - AC2: WHEN addMetadata is invoked, the Routers SHALL accept metadata of type obj.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-apply-after-1f2e2196**: WHEN a caller invokes applyAfter, the Routers SHALL apply the specified after-handler to the route.
+  - Acceptance criteria:
+    - AC1: WHEN applyAfter completes normally, the Routers SHALL return a value of type let rec.
+    - AC2: WHEN applyAfter is invoked, the Routers SHALL accept httpHandler of type HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-apply-before-44333f22**: WHEN a caller invokes applyBefore, the Routers SHALL apply the specified before-handler to the route.
+  - Acceptance criteria:
+    - AC1: WHEN applyBefore completes normally, the Routers SHALL return a value of type let rec.
+    - AC2: WHEN applyBefore is invoked, the Routers SHALL accept httpHandler of type HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-apply-http-verb-endpoint-66e73794**: WHEN a caller invokes applyHttpVerbToEndpoint, the Routers SHALL apply the specified HTTP verb to the given endpoint.
+  - Acceptance criteria:
+    - AC1: WHEN applyHttpVerbToEndpoint completes normally, the Routers SHALL return a value of type let rec.
+    - AC2: WHEN applyHttpVerbToEndpoint is invoked, the Routers SHALL accept verb of type HttpVerb.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-apply-http-verb-endpoint-23147eb1**: WHEN a caller invokes applyHttpVerbToEndpoints, the Routers SHALL apply the specified HTTP verb to the given endpoints.
+  - Acceptance criteria:
+    - AC1: WHEN applyHttpVerbToEndpoints completes normally, the Routers SHALL return a value of type let rec.
+    - AC2: WHEN applyHttpVerbToEndpoints is invoked, the Routers SHALL accept verb of type HttpVerb.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-apply-http-verbs-endpoin-03f8e275**: WHEN a caller invokes applyHttpVerbsToEndpoints, the Routers SHALL apply the specified HTTP verbs to the given endpoints.
+  - Acceptance criteria:
+    - AC1: WHEN applyHttpVerbsToEndpoints completes normally, the Routers SHALL return a value of type let rec.
+    - AC2: WHEN applyHttpVerbsToEndpoints is invoked, the Routers SHALL accept verbs of type HttpVerb list.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-authorize-policy-name-bfc46af7**: WHEN a caller invokes authorizeByPolicyName, the Auth SHALL authorize the policy name by policy name.
+  - Acceptance criteria:
+    - AC1: WHEN authorizeByPolicyName completes normally, the Auth SHALL return a value of type let.
+    - AC2: WHEN authorizeByPolicyName is invoked, the Auth SHALL accept policyName of type string.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-authorize-policy-a95b24d7**: WHEN a caller invokes authorizeByPolicy, the Auth SHALL authorize the policy by policy.
+  - Acceptance criteria:
+    - AC1: WHEN authorizeByPolicy completes normally, the Auth SHALL return a value of type let.
+    - AC2: WHEN authorizeByPolicy is invoked, the Auth SHALL accept policy of type AuthorizationPolicy.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-authorize-request-26c05785**: WHEN a caller invokes authorizeRequest, the Auth SHALL authorize the request.
+  - Acceptance criteria:
+    - AC1: WHEN authorizeRequest completes normally, the Auth SHALL return a value of type let.
+    - AC2: WHEN authorizeRequest is invoked, the Auth SHALL accept predicate of type HttpContext -> bool.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-build-config-6994eb0c**: WHEN a caller invokes buildConfig, the FsharpFriendlySerializer SHALL construct and return the serializer configuration.
+  - Acceptance criteria:
+    - AC1: WHEN buildConfig runs, the FsharpFriendlySerializer SHALL call appendJsonFSharpOptions.
+    - AC2: WHEN buildConfig completes normally, the FsharpFriendlySerializer SHALL return a value of type let.
+    - AC3: WHEN buildConfig is invoked, the FsharpFriendlySerializer SHALL accept fsharpOptions of type JsonFSharpOptions option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-cache-header-ba6ef2f9**: WHEN a caller invokes cacheHeader, the ResponseCaching SHALL set the HTTP response cache header.
+  - Acceptance criteria:
+    - AC1: WHEN cacheHeader is invoked, the ResponseCaching SHALL accept isPublic and duration as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-convert-regex-pattern-fo-b26698ed**: WHEN a caller invokes convertToRegexPatternAndFormatChars, the FormatExpressions SHALL convert the given mode into a regex pattern and its corresponding format characters.
+  - Acceptance criteria:
+    - AC1: WHEN convertToRegexPatternAndFormatChars runs, the FormatExpressions SHALL call ToString.
+    - AC2: WHEN convertToRegexPatternAndFormatChars completes normally, the FormatExpressions SHALL return a value of type let.
+    - AC3: WHEN convertToRegexPatternAndFormatChars is invoked, the FormatExpressions SHALL accept mode of type MatchMode.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-convert-route-template-0c19bdb2**: WHEN a caller invokes convertToRouteTemplate, the RouteTemplateBuilder SHALL convert the given path into a route template.
+  - Acceptance criteria:
+    - AC1: WHEN convertToRouteTemplate runs, the RouteTemplateBuilder SHALL call ToString.
+    - AC2: WHEN convertToRouteTemplate is invoked, the RouteTemplateBuilder SHALL accept path and PrintfFormat as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-convert-tuple-744c7382**: WHEN a caller invokes convertToTuple, the RequestDelegateBuilder SHALL convert the given mappings into a tuple.
+  - Acceptance criteria:
+    - AC1: WHEN convertToTuple runs, the RequestDelegateBuilder SHALL call ToString.
+    - AC2: WHEN convertToTuple completes normally, the RequestDelegateBuilder SHALL return a value of type let.
+    - AC3: WHEN convertToTuple is invoked, the RequestDelegateBuilder SHALL accept mappings of type (string * char) list.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-create-request-delegate-ce335d5e**: WHEN a caller invokes createRequestDelegate, the RequestDelegateBuilder SHALL create and return a request delegate.
+  - Acceptance criteria:
+    - AC1: WHEN createRequestDelegate completes normally, the RequestDelegateBuilder SHALL return a value of type let.
+    - AC2: WHEN createRequestDelegate is invoked, the RequestDelegateBuilder SHALL accept handler of type HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-create-tokenized-request-78e362c2**: WHEN a caller invokes createTokenizedRequestDelegate, the RequestDelegateBuilder SHALL create and return a tokenized request delegate.
+  - Acceptance criteria:
+    - AC1: WHEN createTokenizedRequestDelegate completes normally, the RequestDelegateBuilder SHALL return a value of type let.
+    - AC2: WHEN createTokenizedRequestDelegate is invoked, the RequestDelegateBuilder SHALL accept mappings of type (string * char) list.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-generate-csrf-token-0fa1c128**: WHEN a caller invokes generateCsrfToken, the Csrf SHALL generate and return a CSRF token.
+  - Acceptance criteria:
+    - AC1: WHEN generateCsrfToken completes normally, the Csrf SHALL return ! next ctx.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-get-constraint-1084aa72**: WHEN a caller invokes getConstraint, the RouteTemplateBuilder SHALL return the route constraint corresponding to the given index i.
+  - Acceptance criteria:
+    - AC1: WHEN getConstraint completes normally, the RouteTemplateBuilder SHALL return a value of type let.
+    - AC2: WHEN getConstraint is invoked, the RouteTemplateBuilder SHALL accept i of type int.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-get-cookie-value-7c7b8ef5**: WHEN a caller invokes GetCookieValue, the HttpContextExtensions SHALL return the cookie value associated with the given ctx and key.
+  - Acceptance criteria:
+    - AC1: WHEN GetCookieValue completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetCookieValue is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and key of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: GetCookieValue implementation is unchanged between BEFORE and AFTER, preserving the same lookup and return behaviour.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-form-value-4c153d73**: WHEN a caller invokes GetFormValue, the HttpContextExtensions SHALL return the form value associated with the given ctx and key.
+  - Acceptance criteria:
+    - AC1: WHEN GetFormValue runs, the HttpContextExtensions SHALL call ToString.
+    - AC2: WHEN GetFormValue completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN GetFormValue is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and key of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for GetFormValue are identical, preserving the same logic for checking HasFormContentType and returning the form value via TryGetValue.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-generic-type-f74934da**: WHEN a caller invokes GetGenericType, the Type SHALL return the generic type.
+  - Acceptance criteria:
+    - AC1: WHEN GetGenericType completes normally, the Type SHALL return a value of type member this..
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-get-hosting-environment-7a57e90e**: WHEN a caller invokes GetHostingEnvironment, the HttpContextExtensions SHALL return the hosting environment associated with the given ctx.
+  - Acceptance criteria:
+    - AC1: WHEN GetHostingEnvironment completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetHostingEnvironment is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for GetHostingEnvironment are identical, including the Obsolete attribute and the implementation returning ctx.GetService&lt;IHostingEnvironment>().
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-json-serializer-2babc914**: WHEN a caller invokes GetJsonSerializer, the HttpContextExtensions SHALL return the JSON serializer associated with the given ctx.
+  - Acceptance criteria:
+    - AC1: WHEN GetJsonSerializer completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetJsonSerializer is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for GetJsonSerializer are identical, returning ctx.GetService&lt;Json.ISerializer>() with no change in behavior.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-logger-d1f8b09c**: WHEN a caller invokes GetLogger, the HttpContextExtensions SHALL return the logger associated with the given ctx and category name.
+  - Acceptance criteria:
+    - AC1: WHEN GetLogger completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetLogger is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and categoryName of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: Implementation is byte-for-byte identical between BEFORE and AFTER; behaviour unchanged.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-next-part-path-d3ac65b8**: WHEN a caller invokes getNextPartOfPath, the SubRouting SHALL return the next part of the path.
+  - Acceptance criteria:
+    - AC1: WHEN getNextPartOfPath completes normally, the SubRouting SHALL return a value of type let.
+    - AC2: WHEN getNextPartOfPath is invoked, the SubRouting SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-get-query-string-value-2e99237d**: WHEN a caller invokes GetQueryStringValue, the HttpContextExtensions SHALL return the query string value associated with the given ctx and key.
+  - Acceptance criteria:
+    - AC1: WHEN GetQueryStringValue runs, the HttpContextExtensions SHALL call ToString.
+    - AC2: WHEN GetQueryStringValue completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN GetQueryStringValue is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and key of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: Implementation is identical between BEFORE and AFTER; no behavioural change.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-request-header-346f5139**: WHEN a caller invokes GetRequestHeader, the HttpContextExtensions SHALL return the request header value associated with the given ctx and key.
+  - Acceptance criteria:
+    - AC1: WHEN GetRequestHeader runs, the HttpContextExtensions SHALL call ToString.
+    - AC2: WHEN GetRequestHeader completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN GetRequestHeader is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and key of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: Implementation is identical between BEFORE and AFTER; no behavioural change.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-request-url-2760690a**: WHEN a caller invokes GetRequestUrl, the HttpContextExtensions SHALL return the request URL associated with the given ctx.
+  - Acceptance criteria:
+    - AC1: WHEN GetRequestUrl completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetRequestUrl is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for GetRequestUrl are identical, with no changes to logic or behaviour.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-saved-partial-path-9293de41**: WHEN a caller invokes getSavedPartialPath, the SubRouting SHALL return the saved partial path associated with the given ctx.
+  - Acceptance criteria:
+    - AC1: WHEN getSavedPartialPath completes normally, the SubRouting SHALL return a value of type let.
+    - AC2: WHEN getSavedPartialPath is invoked, the SubRouting SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-get-service-51c01160**: WHEN a caller invokes GetService, the HttpContextExtensions SHALL return the service instance associated with the given ctx.
+  - Acceptance criteria:
+    - AC1: WHEN GetService completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetService is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for GetService are identical, with no changes to logic or behaviour.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-web-host-environment-792e49b3**: WHEN a caller invokes GetWebHostEnvironment, the HttpContextExtensions SHALL return the web host environment associated with the given ctx.
+  - Acceptance criteria:
+    - AC1: WHEN GetWebHostEnvironment completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetWebHostEnvironment is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for GetWebHostEnvironment are identical, with no changes to logic or behaviour.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-get-xml-serializer-81b867f4**: WHEN a caller invokes GetXmlSerializer, the HttpContextExtensions SHALL return the XML serializer associated with the given ctx.
+  - Acceptance criteria:
+    - AC1: WHEN GetXmlSerializer completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN GetXmlSerializer is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for GetXmlSerializer are identical, directly returning the ISerializer service from the HttpContext. No behavioral change observed.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handle-context-70b5d515**: WHEN a caller invokes handleContext, the Core SHALL process the given HTTP context and return the resulting context.
+  - Acceptance criteria:
+    - AC1: WHEN handleContext completes normally, the Core SHALL return a value of type let.
+    - AC2: WHEN handleContext is invoked, the Core SHALL accept contextMap of type HttpContext -> HttpFuncResult.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The handleContext implementation is unchanged between BEFORE and AFTER, preserving the same logic of invoking contextMap and handling the response state.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handle-result-3919080a**: WHEN a caller invokes handleResult, the RequestDelegateBuilder SHALL process the provided result and produce the corresponding HTTP response.
+  - Acceptance criteria:
+    - AC1: WHEN handleResult runs, the RequestDelegateBuilder SHALL call SetStatusCode.
+    - AC2: WHEN handleResult completes normally, the RequestDelegateBuilder SHALL return a value of type let.
+    - AC3: WHEN handleResult is invoked, the RequestDelegateBuilder SHALL accept result of type HttpContext option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-6ec01958**: WHEN a caller invokes challenge, the Auth SHALL issue an authentication challenge to the current request.
+  - Acceptance criteria:
+    - AC1: WHEN challenge completes normally, the Auth SHALL return ! next ctx.
+    - AC2: WHEN challenge is invoked, the Auth SHALL accept authScheme of type string.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-58850353**: WHEN a caller invokes csrfTokenHtml, the Csrf SHALL generate and return the CSRF token formatted as an HTML hidden input element.
+  - Acceptance criteria:
+    - AC1: WHEN csrfTokenHtml completes normally, the Csrf SHALL return ! Core.htmlString html next ctx.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-6f45bf33**: WHEN a caller invokes csrfTokenJson, the Csrf SHALL generate and return the CSRF token formatted as a JSON object.
+  - Acceptance criteria:
+    - AC1: WHEN csrfTokenJson completes normally, the Csrf SHALL return ! Core.json response next ctx.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-8bd65de0**: WHEN a caller invokes evaluateUserPolicy, the Auth SHALL evaluate the specified authorization policy against the current user and return the evaluation result.
+  - Acceptance criteria:
+    - AC1: WHEN evaluateUserPolicy runs, the Auth SHALL call authorizeRequest.
+    - AC2: WHEN evaluateUserPolicy completes normally, the Auth SHALL return a value of type let.
+    - AC3: WHEN evaluateUserPolicy is invoked, the Auth SHALL accept policy of type ClaimsPrincipal -> bool.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-96df99fe**: WHEN a caller invokes requiresAuthentication, the Auth SHALL verify whether the current request is authenticated and return the authentication requirement result.
+  - Acceptance criteria:
+    - AC1: WHEN requiresAuthentication completes normally, the Auth SHALL return a value of type let.
+    - AC2: WHEN requiresAuthentication is invoked, the Auth SHALL accept authFailedHandler of type HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-99ac06af**: WHEN a caller invokes requiresRoleOf, the Auth SHALL perform requiresRoleOf.
+  - Acceptance criteria:
+    - AC1: WHEN requiresRoleOf completes normally, the Auth SHALL return a value of type let.
+    - AC2: WHEN requiresRoleOf is invoked, the Auth SHALL accept roles of type string list.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-be13f988**: WHEN a caller invokes requiresRole, the Auth SHALL perform requiresRole.
+  - Acceptance criteria:
+    - AC1: WHEN requiresRole completes normally, the Auth SHALL return a value of type let.
+    - AC2: WHEN requiresRole is invoked, the Auth SHALL accept role of type string.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-authentication-f-bb816f4e**: WHEN a caller invokes signOut, the Auth SHALL sign the current user out of the active authentication session.
+  - Acceptance criteria:
+    - AC1: WHEN signOut completes normally, the Auth SHALL return ! next ctx.
+    - AC2: WHEN signOut is invoked, the Auth SHALL accept authScheme of type string.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-de991f7c**: WHEN a caller invokes appendJsonFSharpOptions, the FsharpFriendlySerializer SHALL add F#-specific JSON serialization options to the serializer configuration.
+  - Acceptance criteria:
+    - AC1: WHEN appendJsonFSharpOptions completes normally, the FsharpFriendlySerializer SHALL return a value of type let.
+    - AC2: WHEN appendJsonFSharpOptions is invoked, the FsharpFriendlySerializer SHALL accept fsharpOptions of type JsonFSharpOptions.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-486abe47**: WHEN a caller invokes bindForm, the Core SHALL bind the incoming form data to the specified model type.
+  - Acceptance criteria:
+    - AC1: WHEN bindForm completes normally, the Core SHALL return ! f model next ctx.
+    - AC2: WHEN bindForm is invoked, the Core SHALL accept culture of type CultureInfo option.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The bindForm implementation is identical in both BEFORE and AFTER, binding form data using culture-specific or default binding logic with no observable change.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-configuration-fo-7547cb0c**: WHEN a caller invokes bindModel, the Core SHALL bind the incoming request data to the specified model type.
+  - Acceptance criteria:
+    - AC1: WHEN bindModel completes normally, the Core SHALL return ! f model next ctx.
+    - AC2: WHEN bindModel is invoked, the Core SHALL accept culture of type CultureInfo option.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The bindModel implementation is byte-for-byte identical between BEFORE and AFTER; no logic, signature, or behavior change detected.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-configuration-fo-890a3d6c**: WHEN a caller invokes Bind, the OptionBuilder SHALL apply the given binder function to the wrapped value and return the resulting option.
+  - Acceptance criteria:
+    - AC1: WHEN Bind completes normally, the OptionBuilder SHALL return a value of type member __..
+    - AC2: WHEN Bind is invoked, the OptionBuilder SHALL accept v and f as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-c6bfba1c**: WHEN a caller invokes configureEndpoint, the Routers SHALL apply the specified configuration to the given endpoint.
+  - Acceptance criteria:
+    - AC1: WHEN configureEndpoint completes normally, the Routers SHALL return a value of type let rec.
+    - AC2: WHEN configureEndpoint is invoked, the Routers SHALL accept f of type ConfigureEndpoint.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-5bcddcb1**: WHEN a caller invokes hasAnyContentTypes, the RequestLimitation SHALL return a boolean indicating whether any content types are configured.
+  - Acceptance criteria:
+    - AC1: WHEN hasAnyContentTypes runs, the RequestLimitation SHALL call notAcceptable.
+    - AC2: WHEN hasAnyContentTypes completes normally, the RequestLimitation SHALL return a value of type let.
+    - AC3: WHEN hasAnyContentTypes is invoked, the RequestLimitation SHALL accept contentTypes of type string list.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-e17c7659**: WHEN a caller invokes hasContentType, the RequestLimitation SHALL return a boolean indicating whether the specified content type is configured.
+  - Acceptance criteria:
+    - AC1: WHEN hasContentType completes normally, the RequestLimitation SHALL return a value of type let.
+    - AC2: WHEN hasContentType is invoked, the RequestLimitation SHALL accept contentType of type string.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-1b4d087d**: WHEN a caller invokes an operation of INegotiationConfig, the INegotiationConfig SHALL expose the Rules collection and the UnacceptableHandler for content negotiation.
+  - Acceptance criteria:
+    - AC1: The INegotiationConfig SHALL expose the operations Rules and UnacceptableHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-95cb6b30**: WHEN a caller invokes IsFSharpOption, the Type SHALL return a boolean indicating whether the type represents an F# option type.
+  - Acceptance criteria:
+    - AC1: WHEN IsFSharpOption runs, the Type SHALL call IsGeneric.
+    - AC2: WHEN IsFSharpOption completes normally, the Type SHALL return a value of type member this..
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-72079243**: WHEN a caller invokes maxContentLength, the RequestLimitation SHALL set the maximum allowed content length for the request.
+  - Acceptance criteria:
+    - AC1: WHEN maxContentLength runs, the RequestLimitation SHALL call notAcceptable.
+    - AC2: WHEN maxContentLength completes normally, the RequestLimitation SHALL return a value of type let.
+    - AC3: WHEN maxContentLength is invoked, the RequestLimitation SHALL accept maxLength of type int64.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-bc7a6e99**: WHEN a caller invokes mustAcceptAny, the RequestLimitation SHALL require that the request's Accept header matches at least one of the specified content types.
+  - Acceptance criteria:
+    - AC1: WHEN mustAcceptAny runs, the RequestLimitation SHALL call notAcceptable and ToString.
+    - AC2: WHEN mustAcceptAny completes normally, the RequestLimitation SHALL return a value of type let.
+    - AC3: WHEN mustAcceptAny is invoked, the RequestLimitation SHALL accept mimeTypes of type string list.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-a2dc7694**: WHEN a caller creates a Serializer, the Serializer SHALL initialize itself using the provided settings.
+  - Acceptance criteria:
+    - AC1: WHEN new is constructed, the Serializer SHALL accept settings of type XmlWriterSettings.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-582dbb98**: WHEN a caller invokes privateResponseCaching, the ResponseCaching SHALL configure the response to be cached privately with the specified caching parameters.
+  - Acceptance criteria:
+    - AC1: WHEN privateResponseCaching runs, the ResponseCaching SHALL call responseCaching.
+    - AC2: WHEN privateResponseCaching completes normally, the ResponseCaching SHALL return a value of type let.
+    - AC3: WHEN privateResponseCaching is invoked, the ResponseCaching SHALL accept seconds of type int.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-01374f53**: WHEN a caller invokes routeWithExtensions, the Routers SHALL register a route that matches the specified path including file extensions.
+  - Acceptance criteria:
+    - AC1: WHEN routeWithExtensions completes normally, the Routers SHALL return a value of type let.
+    - AC2: WHEN routeWithExtensions is invoked, the Routers SHALL accept configureEndpoint of type ConfigureEndpoint.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-configuration-fo-a40d794a**: WHEN a caller invokes strOption, the Helpers SHALL convert the given string into an option value, returning None for null or empty strings.
+  - Acceptance criteria:
+    - AC1: WHEN strOption completes normally, the Helpers SHALL return a value of type let.
+    - AC2: WHEN strOption is invoked, the Helpers SHALL accept str of type string.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-d5793337**: WHEN a caller invokes routeCif, the Routing SHALL match the request path against the specified route pattern using case-insensitive comparison and invoke the associated handler.
+  - Acceptance criteria:
+    - AC1: WHEN routeCif runs, the Routing SHALL call IgnoreCaseExact.
+    - AC2: WHEN routeCif completes normally, the Routing SHALL return a value of type let.
+    - AC3: WHEN routeCif is invoked, the Routing SHALL accept path of type PrintfFormat<_, _, _, _, 'T>) (routeHandler: 'T -> HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-f688bc49**: WHEN a caller invokes routeStartsWithCif, the Routing SHALL match the request path that starts with the specified prefix using case-insensitive comparison and invoke the associated handler.
+  - Acceptance criteria:
+    - AC1: WHEN routeStartsWithCif completes normally, the Routing SHALL return a value of type let.
+    - AC2: WHEN routeStartsWithCif is invoked, the Routing SHALL accept path of type PrintfFormat<_, _, _, _, 'T>) (routeHandler: 'T -> HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-b10e31b3**: WHEN a caller invokes routeStartsWithf, the Routing SHALL match the request path that starts with the specified formatted prefix and invoke the associated handler with the parsed arguments.
+  - Acceptance criteria:
+    - AC1: WHEN routeStartsWithf completes normally, the Routing SHALL return a value of type let.
+    - AC2: WHEN routeStartsWithf is invoked, the Routing SHALL accept path of type PrintfFormat<_, _, _, _, 'T>) (routeHandler: 'T -> HttpHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-42da65c6**: WHEN a caller invokes tryGetParser, the RequestDelegateBuilder SHALL attempt to retrieve a parser function for the specified type and return it if found.
+  - Acceptance criteria:
+    - AC1: WHEN tryGetParser completes normally, the RequestDelegateBuilder SHALL return a value of type let.
+    - AC2: WHEN tryGetParser is invoked, the RequestDelegateBuilder SHALL accept c of type char.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-7fd4c48b**: WHEN a caller invokes tryMatchInputExact, the FormatExpressions SHALL attempt to match the input string exactly against the specified format and return the parsed result if successful.
+  - Acceptance criteria:
+    - AC1: WHEN tryMatchInputExact is invoked, the FormatExpressions SHALL accept format, PrintfFormat, ignoreCase and input as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-99efadf9**: WHEN a caller invokes tryMatchInput, the FormatExpressions SHALL attempt to match the input string against the specified format and return the parsed result if successful.
+  - Acceptance criteria:
+    - AC1: WHEN tryMatchInput is invoked, the FormatExpressions SHALL accept format, PrintfFormat, options and input as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-data-processing-8967cfca**: WHEN a caller invokes tryParse, the ModelParser SHALL handle data processing for the try parse operation.
+  - Acceptance criteria:
+    - AC1: WHEN tryParse completes normally, the ModelParser SHALL return a value of type let.
+    - AC2: WHEN tryParse is invoked, the ModelParser SHALL accept culture of type CultureInfo option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-retrieval-for-bi-0fcf077a**: WHEN a caller invokes bindQuery, the Core SHALL perform bindQuery.
+  - Acceptance criteria:
+    - AC1: WHEN bindQuery completes normally, the Core SHALL return a value of type let.
+    - AC2: WHEN bindQuery is invoked, the Core SHALL accept culture of type CultureInfo option.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The bindQuery implementation is unchanged between BEFORE and AFTER, preserving the same binding logic and behavior.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-retrieval-for-bi-0273a156**: WHEN a caller invokes BindQueryString, the HttpContextExtensions SHALL bind the request's query string values to the specified model type.
+  - Acceptance criteria:
+    - AC1: WHEN BindQueryString completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN BindQueryString is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BindQueryString extension method implementation is identical in BEFORE and AFTER, with no change to parsing logic or behavior.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-retrieval-for-is-e0884392**: WHEN a caller invokes IsGeneric, the Type SHALL return a boolean indicating whether the type is a generic type.
+  - Acceptance criteria:
+    - AC1: WHEN IsGeneric completes normally, the Type SHALL return a value of type member this..
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-retrieval-for-is-c56719c4**: WHEN a caller invokes IsHeadOrGetRequest, the HttpContext SHALL return a boolean indicating whether the request method is HEAD or GET.
+  - Acceptance criteria:
+    - AC1: WHEN IsHeadOrGetRequest completes normally, the HttpContext SHALL return a value of type member this..
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-handles-retrieval-for-tr-f466b584**: WHEN a caller invokes tryBindQuery, the Core SHALL attempt to bind the request's query string to the specified model type and return the result.
+  - Acceptance criteria:
+    - AC1: WHEN tryBindQuery is invoked, the Core SHALL accept parsingErrorHandler, culture, option and successHandler as input.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for tryBindQuery are identical; no behavioral change is present.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-retrieval-for-tr-1633216e**: WHEN a caller invokes TryBindQueryString, the HttpContextExtensions SHALL attempt to bind the query string to the specified model type and return success or failure.
+  - Acceptance criteria:
+    - AC1: WHEN TryBindQueryString completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN TryBindQueryString is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for TryBindQueryString are identical; no behavioral change is present.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-retrieval-for-tr-dfc2f08d**: WHEN a caller invokes TryGetQueryStringValue, the HttpContextExtensions SHALL attempt to retrieve the value of the specified query string parameter.
+  - Acceptance criteria:
+    - AC1: WHEN TryGetQueryStringValue runs, the HttpContextExtensions SHALL call ToString.
+    - AC2: WHEN TryGetQueryStringValue completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN TryGetQueryStringValue is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and key of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for TryGetQueryStringValue are identical; no behavioral change is present.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-retrieval-for-tr-760da35d**: WHEN a caller invokes TryGetRequestHeader, the HttpContextExtensions SHALL attempt to retrieve the value of the specified request header.
+  - Acceptance criteria:
+    - AC1: WHEN TryGetRequestHeader runs, the HttpContextExtensions SHALL call ToString.
+    - AC2: WHEN TryGetRequestHeader completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN TryGetRequestHeader is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and key of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code snippets for TryGetRequestHeader are identical, showing no change in implementation or observable behaviour.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-handles-validation-for-h-ce8b974b**: WHEN a caller invokes httpVerb, the Core SHALL restrict the route handler to the specified HTTP verb.
+  - Acceptance criteria:
+    - AC1: WHEN httpVerb completes normally, the Core SHALL return a value of type let.
+    - AC2: WHEN httpVerb is invoked, the Core SHALL accept validate of type string -> bool.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for the private httpVerb function are identical, indicating the HTTP verb restriction logic is unchanged.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-parse-data-processing-9a0623fe**: WHEN a caller invokes parse, the ModelParser SHALL parse the culture.
+  - Acceptance criteria:
+    - AC1: WHEN parse completes normally, the ModelParser SHALL return a value of type let.
+    - AC2: WHEN parse is invoked, the ModelParser SHALL accept culture of type CultureInfo option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-parse-model-9a2d75b0**: WHEN a caller invokes parseModel, the ModelParser SHALL parse the provided data into an instance of the specified model type.
+  - Acceptance criteria:
+    - AC1: WHEN parseModel runs, the ModelParser SHALL call IsFSharpOption, MakeNoneCase, GetGenericType, MakeSomeCase and choose.
+    - AC2: WHEN parseModel is invoked, the ModelParser SHALL accept model, cultureInfo, option, data and IDictionary (+1 more) as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-parse-range-fb4f235f**: WHEN a caller invokes parseRange, the RangeHelper SHALL parse the specified range header value into its corresponding byte range values.
+  - Acceptance criteria:
+    - AC1: WHEN parseRange completes normally, the RangeHelper SHALL return a value of type let.
+    - AC2: WHEN parseRange is invoked, the RangeHelper SHALL accept request of type HttpRequest.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-parse-value-fa73472a**: WHEN a caller invokes parseValue, the ModelParser SHALL parse the provided raw value into the specified target type.
+  - Acceptance criteria:
+    - AC1: WHEN parseValue runs, the ModelParser SHALL call IsGeneric, IsFSharpList, IsFSharpOption, GetGenericType and MakeNoneCase (+2 more).
+    - AC2: WHEN parseValue completes normally, the ModelParser SHALL return a value of type let rec.
+    - AC3: WHEN parseValue is invoked, the ModelParser SHALL accept t of type Type.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-date-time-extens-dc86c835**: WHEN a caller invokes an operation of DateTimeExtensions, the DateTimeExtensions SHALL expose ToHtmlString (convert a DateTime to its HTML-formatted string representation), ToIsoString (convert a DateTime to its ISO 8601 string representation), and CutOffMs (truncate the milliseconds component of a DateTime).
+  - Acceptance criteria:
+    - AC1: The DateTimeExtensions SHALL expose the operations ToHtmlString, ToIsoString and CutOffMs.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-default-negotiat-0a501b19**: WHEN a caller invokes an operation of DefaultNegotiationConfig, the DefaultNegotiationConfig SHALL expose Rules (return the default mapping of media types to response-writing functions) and UnacceptableHandler (return the default handler invoked when no acceptable media type can be negotiated).
+  - Acceptance criteria:
+    - AC1: The DefaultNegotiationConfig SHALL expose the operations Rules and UnacceptableHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-endpoint-route-b-b6e8ec28**: WHEN a caller invokes an operation of EndpointRouteBuilderExtensions, the EndpointRouteBuilderExtensions SHALL expose MapSingleEndpoint (register a single route with its handler), MapMultiEndpoint (register multiple routes sharing a handler), MapNestedEndpoint (register a group of nested sub-routes under a common path), and MapGiraffeEndpoints (register a Giraffe HttpHandler as a set of ASP.NET Core endpoints).
+  - Acceptance criteria:
+    - AC1: The EndpointRouteBuilderExtensions SHALL expose the operations MapSingleEndpoint, MapMultiEndpoint, MapNestedEndpoint and MapGiraffeEndpoints.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-fsharp-friendly-a716f874**: WHEN a caller invokes an operation of FsharpFriendlySerializer, the FsharpFriendlySerializer SHALL expose appendJsonFSharpOptions (add F#-friendly JSON serialization options to a serializer options builder) and buildConfig (construct the final JSON serializer configuration incorporating those options).
+  - Acceptance criteria:
+    - AC1: The FsharpFriendlySerializer SHALL expose the operations appendJsonFSharpOptions and buildConfig.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-giraffe-error-ha-0ca511d9**: WHEN a caller invokes an operation of GiraffeErrorHandlerMiddleware, the GiraffeErrorHandlerMiddleware SHALL expose Invoke (execute the next middleware in the pipeline, catch any unhandled exception it raises, and pass it to the configured error handler to produce the HTTP response).
+  - Acceptance criteria:
+    - AC1: The GiraffeErrorHandlerMiddleware SHALL expose the operation Invoke.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-giraffe-middlewa-f666c1b8**: WHEN a caller invokes an operation of GiraffeMiddleware, the GiraffeMiddleware SHALL expose Invoke (execute the configured Giraffe HttpHandler against the current HttpContext, and forward the request to the next middleware if no handler produces a response).
+  - Acceptance criteria:
+    - AC1: The GiraffeMiddleware SHALL expose the operation Invoke.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-http-context-ext-83ff5cee**: WHEN a caller invokes an operation of HttpContextExtensions, the HttpContextExtensions SHALL expose GetRequestUrl (return the full URL of the current request), GetService (resolve a service instance of the specified type from the request's service provider), GetLogger (return a logger instance for the specified category from the request's service provider), GetHostingEnvironment (return the current hosting environment), GetWebHostEnvironment (return the current web host environment), and the additional 30 extension operations for reading and writing HTTP request/response data as documented for this type.
+  - Acceptance criteria:
+    - AC1: The HttpContextExtensions SHALL expose the operations GetRequestUrl, GetService, GetLogger, GetHostingEnvironment and GetWebHostEnvironment (+30 more).
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The shown portions of HttpContextExtensions (GetRequestUrl, GetService, GetLogger, GetHostingEnvironment, GetWebHostEnvironment, TryGetRequestHeader, GetRequestHeader, TryGetQueryStringValue, GetQueryStringValue, etc.) are identical between BEFORE and AFTER, with only a minor line-range truncation difference (540 vs 536 lines) which appears cosmetic. No functional changes are visible in the provided code.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-provide-http-verb-capabi-01e3c5a4**: WHEN a caller invokes an operation of HttpVerb, the HttpVerb SHALL expose ToString (return the string representation of the HTTP verb value).
+  - Acceptance criteria:
+    - AC1: The HttpVerb SHALL expose the operation ToString.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-json-only-negoti-423f786b**: WHEN a caller invokes an operation of JsonOnlyNegotiationConfig, the JsonOnlyNegotiationConfig SHALL expose Rules (return a mapping that only accepts JSON media types for content negotiation) and UnacceptableHandler (return the handler invoked when the requested media type is not JSON).
+  - Acceptance criteria:
+    - AC1: The JsonOnlyNegotiationConfig SHALL expose the operations Rules and UnacceptableHandler.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-match-options-ca-1c1f7482**: WHEN a caller invokes an operation of MatchOptions, the MatchOptions SHALL expose Exact (return the option specifying case-sensitive exact string matching) and IgnoreCaseExact (return the option specifying case-insensitive exact string matching).
+  - Acceptance criteria:
+    - AC1: The MatchOptions SHALL expose the operations Exact and IgnoreCaseExact.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-negotiation-exte-ff16f93e**: WHEN a caller invokes an operation of NegotiationExtensions, the NegotiationExtensions SHALL expose NegotiateWithAsync (negotiate and write a response using the supplied rules and unacceptable handler) and NegotiateAsync (negotiate and write a response using the configured default negotiation rules).
+  - Acceptance criteria:
+    - AC1: The NegotiationExtensions SHALL expose the operations NegotiateWithAsync and NegotiateAsync.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-option-builder-c-95c0db9b**: WHEN a caller invokes an operation of OptionBuilder, the OptionBuilder SHALL expose Bind (chain a computation that returns an option by applying a continuation function to its contained value), Return (wrap a value in a Some option), ReturnFrom (return an existing option value unchanged), and Zero (return the None option as the default empty result).
+  - Acceptance criteria:
+    - AC1: The OptionBuilder SHALL expose the operations Bind, Return, ReturnFrom and Zero.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-precondition-ext-44ab232a**: WHEN a caller invokes an operation of PreconditionExtensions, the PreconditionExtensions SHALL expose ValidatePreconditions (evaluate HTTP conditional request headers against the resource's last-modified date and ETag to determine the precondition result), NotModifiedResponse (write a 304 Not Modified response), and PreconditionFailedResponse (write a 412 Precondition Failed response).
+  - Acceptance criteria:
+    - AC1: The PreconditionExtensions SHALL expose the operations ValidatePreconditions, NotModifiedResponse and PreconditionFailedResponse.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-range-boundary-c-0d13fcf2**: WHEN a caller invokes an operation of RangeBoundary, the RangeBoundary SHALL expose Length (return the number of bytes spanned by the range boundary).
+  - Acceptance criteria:
+    - AC1: The RangeBoundary SHALL expose the operation Length.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-result-builder-c-3ae520b7**: WHEN a caller invokes an operation of ResultBuilder, the ResultBuilder SHALL expose Bind (chain a computation that returns a Result by applying a continuation function to its Ok value) and Return (wrap a value in an Ok result).
+  - Acceptance criteria:
+    - AC1: The ResultBuilder SHALL expose the operations Bind and Return.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-service-collecti-ba5e5704**: WHEN a caller invokes an operation of ServiceCollectionExtensions, the ServiceCollectionExtensions SHALL expose AddGiraffe (register the Giraffe services required for request handling into the dependency injection container).
+  - Acceptance criteria:
+    - AC1: The ServiceCollectionExtensions SHALL expose the operation AddGiraffe.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-provide-streaming-extens-8494ab8f**: WHEN a caller invokes an operation of StreamingExtensions, the StreamingExtensions SHALL expose RangeUnit (return the HTTP range unit string), WriteStreamToBodyAsync (write a stream directly to the HTTP response body), WriteStreamAsync (write a stream to the response, optionally supporting HTTP range requests), and WriteFileStreamAsync (open and write a file's contents as a stream to the response, optionally supporting HTTP range requests).
+  - Acceptance criteria:
+    - AC1: The StreamingExtensions SHALL expose the operations RangeUnit, WriteStreamToBodyAsync, WriteStreamAsync and WriteFileStreamAsync.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-read-body-buffered-from-94072d37**: WHEN a caller invokes ReadBodyBufferedFromRequestAsync, the HttpContextExtensions SHALL read the entire request body into a buffer and return it as a string asynchronously.
+  - Acceptance criteria:
+    - AC1: WHEN ReadBodyBufferedFromRequestAsync completes normally, the HttpContextExtensions SHALL return body.
+    - AC2: WHEN ReadBodyBufferedFromRequestAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for ReadBodyBufferedFromRequestAsync are identical, with no changes to logic, so the behaviour of reading and buffering the request body is preserved.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-read-body-from-request-a-702fb02e**: WHEN a caller invokes ReadBodyFromRequestAsync, the HttpContextExtensions SHALL read the request body stream and return its contents as a string asynchronously.
+  - Acceptance criteria:
+    - AC1: WHEN ReadBodyFromRequestAsync completes normally, the HttpContextExtensions SHALL return ! reader.ReadToEndAsync().
+    - AC2: WHEN ReadBodyFromRequestAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and leaveOpen of type bool.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for ReadBodyFromRequestAsync are identical, so the behaviour of reading the request body stream remains unchanged.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-read-file-as-string-asyn-b26f4384**: WHEN a caller invokes readFileAsStringAsync, the Helpers SHALL read the contents of the file at the given file path and return them as a string asynchronously.
+  - Acceptance criteria:
+    - AC1: WHEN readFileAsStringAsync completes normally, the Helpers SHALL return ! reader.ReadToEndAsync().
+    - AC2: WHEN readFileAsStringAsync is invoked, the Helpers SHALL accept filePath of type string.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-csrf-token-ext-5467f88c**: WHILE the caller supplies invalidTokenHandler, WHEN a caller invokes validateCsrfTokenExt, the Csrf SHALL validate the csrf token ext.
+  - Acceptance criteria:
+    - AC1: WHEN validateCsrfTokenExt runs, the Csrf SHALL call GetLogger.
+    - AC2: WHEN validateCsrfTokenExt completes normally, the Csrf SHALL return ! handler earlyReturn ctx.
+    - AC3: WHEN validateCsrfTokenExt is invoked, the Csrf SHALL accept invalidTokenHandler of type HttpHandler option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-format-1c6009a8**: WHEN a caller invokes validateFormat, the FormatExpressions SHALL check the input string against the specified format pattern and return whether it is valid.
+  - Acceptance criteria:
+    - AC1: WHEN validateFormat runs, the FormatExpressions SHALL call ToString.
+    - AC2: WHEN validateFormat is invoked, the FormatExpressions SHALL accept format and PrintfFormat as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-match-4e57df6a**: WHEN a caller invokes ValidateIfMatch, the HttpContext SHALL validate the if match.
+  - Acceptance criteria:
+    - AC1: WHEN ValidateIfMatch completes normally, the HttpContext SHALL return a value of type member this..
+    - AC2: WHEN ValidateIfMatch is invoked, the HttpContext SHALL accept eTag of type EntityTagHeaderValue option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-modified-since-41b3fbcf**: WHEN a caller invokes ValidateIfModifiedSince, the HttpContext SHALL compare the request's If-Modified-Since header value against the resource's last-modified date and return the resulting precondition status.
+  - Acceptance criteria:
+    - AC1: WHEN ValidateIfModifiedSince runs, the HttpContext SHALL call IsHeadOrGetRequest and CutOffMs.
+    - AC2: WHEN ValidateIfModifiedSince completes normally, the HttpContext SHALL return a value of type member this..
+    - AC3: WHEN ValidateIfModifiedSince is invoked, the HttpContext SHALL accept lastModified of type DateTimeOffset option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-none-match-ebf70121**: WHEN a caller invokes ValidateIfNoneMatch, the HttpContext SHALL validate the if none match.
+  - Acceptance criteria:
+    - AC1: WHEN ValidateIfNoneMatch runs, the HttpContext SHALL call IsHeadOrGetRequest.
+    - AC2: WHEN ValidateIfNoneMatch completes normally, the HttpContext SHALL return a value of type member this..
+    - AC3: WHEN ValidateIfNoneMatch is invoked, the HttpContext SHALL accept eTag of type EntityTagHeaderValue option.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-unmodified-sinc-ca223508**: WHEN a caller invokes ValidateIfUnmodifiedSince, the HttpContext SHALL compare the request's If-Unmodified-Since header value against the resource's last-modified date and return the resulting precondition status.
+  - Acceptance criteria:
+    - AC1: WHEN ValidateIfUnmodifiedSince runs, the HttpContext SHALL call CutOffMs.
+    - AC2: WHEN ValidateIfUnmodifiedSince is invoked, the HttpContext SHALL accept lastModified and option as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-model-49681878**: WHEN a caller invokes validateModel, the ModelValidation SHALL apply the model's validation rules to the given instance and return the validation result.
+  - Acceptance criteria:
+    - AC1: WHEN validateModel runs, the ModelValidation SHALL call Validate.
+    - AC2: WHEN validateModel completes normally, the ModelValidation SHALL return a value of type let.
+    - AC3: WHEN validateModel is invoked, the ModelValidation SHALL accept f of type 'T -> HttpHandler) (model: 'T.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-validate-ranges-00d671a4**: WHEN a caller invokes validateRanges, the RangeHelper SHALL check the given byte ranges against the resource length and return whether they are valid.
+  - Acceptance criteria:
+    - AC1: WHEN validateRanges completes normally, the RangeHelper SHALL return a value of type let.
+    - AC2: WHEN validateRanges is invoked, the RangeHelper SHALL accept ranges of type ICollection&lt;RangeItemHeaderValue>.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-write-bytes-async-4863f97a**: WHEN a caller invokes WriteBytesAsync, the HttpContextExtensions SHALL write the given byte array to the HTTP response body asynchronously and set the appropriate content length.
+  - Acceptance criteria:
+    - AC1: WHEN WriteBytesAsync runs, the HttpContextExtensions SHALL call SetHttpHeader.
+    - AC2: WHEN WriteBytesAsync completes normally, the HttpContextExtensions SHALL return Some ctx.
+    - AC3: WHEN WriteBytesAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and bytes of type byte[].
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for WriteBytesAsync are identical, including content-length handling and conditional body writing logic, so behaviour is preserved.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-file-stream-async-a6fe02f0**: WHEN a caller invokes WriteFileStreamAsync, the StreamingExtensions SHALL open the specified file and write its contents as a stream to the HTTP response body asynchronously, optionally honoring HTTP range requests.
+  - Acceptance criteria:
+    - AC1: WHEN WriteFileStreamAsync runs, the StreamingExtensions SHALL call GetWebHostEnvironment and WriteStreamAsync.
+    - AC2: WHEN WriteFileStreamAsync completes normally, the StreamingExtensions SHALL return ! ctx.WriteStreamAsync(enableRangeProcessing, stream, eTag, lastModified).
+    - AC3: WHEN WriteFileStreamAsync is invoked, the StreamingExtensions SHALL accept ctx, enableRangeProcessing, filePath, eTag and option (+1 more) as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-write-html-file-async-a015f317**: WHEN a caller invokes WriteHtmlFileAsync, the HttpContextExtensions SHALL read the specified HTML file's contents and write them to the HTTP response body asynchronously with the HTML content type.
+  - Acceptance criteria:
+    - AC1: WHEN WriteHtmlFileAsync runs, the HttpContextExtensions SHALL call GetWebHostEnvironment.
+    - AC2: WHEN WriteHtmlFileAsync completes normally, the HttpContextExtensions SHALL return ! ctx.WriteStringAsync html.
+    - AC3: WHEN WriteHtmlFileAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and filePath of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER implementations of WriteHtmlFileAsync are identical in logic: resolving the file path, setting the content type, reading the file asynchronously, and writing it to the response. No behavioural change is present.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-html-string-async-21b0227a**: WHEN a caller invokes WriteHtmlStringAsync, the HttpContextExtensions SHALL write the given HTML string to the HTTP response body asynchronously with the HTML content type.
+  - Acceptance criteria:
+    - AC1: WHEN WriteHtmlStringAsync completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN WriteHtmlStringAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and html of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: WriteHtmlStringAsync code is unchanged between BEFORE and AFTER, setting content type and writing the string asynchronously in the same way.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-html-view-async-b43e4e13**: WHEN a caller invokes WriteHtmlViewAsync, the HttpContextExtensions SHALL render the given HTML view to a string and write it to the HTTP response body asynchronously with the HTML content type.
+  - Acceptance criteria:
+    - AC1: WHEN WriteHtmlViewAsync completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN WriteHtmlViewAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and htmlView of type XmlNode.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: WriteHtmlViewAsync logic is identical in BEFORE and AFTER (only line numbers differ due to surrounding code changes), still rendering the XmlNode to bytes, setting content type, and writing bytes asynchronously.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-json-async-ce428628**: WHEN a caller invokes WriteJsonAsync, the HttpContextExtensions SHALL serialize the given object to JSON and write it to the HTTP response body asynchronously with the JSON content type.
+  - Acceptance criteria:
+    - AC1: WHEN WriteJsonAsync runs, the HttpContextExtensions SHALL call GetJsonSerializer.
+    - AC2: WHEN WriteJsonAsync is invoked, the HttpContextExtensions SHALL accept ctx and dataObj as input.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for WriteJsonAsync are identical: same content type set, same serializer retrieval, same SerializeToBytes/WriteBytesAsync call chain. No behavioural change.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-json-chunked-async-0f5c39c7**: WHEN a caller invokes WriteJsonChunkedAsync, the HttpContextExtensions SHALL serialize the given object to JSON and write it to the HTTP response body asynchronously in chunked transfer encoding.
+  - Acceptance criteria:
+    - AC1: WHEN WriteJsonChunkedAsync runs, the HttpContextExtensions SHALL call GetJsonSerializer.
+    - AC2: WHEN WriteJsonChunkedAsync completes normally, the HttpContextExtensions SHALL return Some ctx.
+    - AC3: WHEN WriteJsonChunkedAsync is invoked, the HttpContextExtensions SHALL accept ctx and dataObj as input.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for WriteJsonChunkedAsync are identical, including the comment about not setting Transfer-Encoding manually, the HEAD method check, and the SerializeToStreamAsync call. No behavioural change.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-markdown-async-b2196dbb**: WHEN a caller invokes WriteMarkdownAsync, the HttpContextExtensions SHALL convert the given Markdown content to HTML and write it to the HTTP response body asynchronously.
+  - Acceptance criteria:
+    - AC1: WHEN WriteMarkdownAsync runs, the HttpContextExtensions SHALL call SetContentType.
+    - AC2: WHEN WriteMarkdownAsync completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN WriteMarkdownAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and markdown of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: In BEFORE, the content type was conditionally set based on target framework: NET8_0_OR_GREATER used System.Net.Mime.MediaTypeNames.Text.Markdown, otherwise a hardcoded 'text/markdown; charset=utf-8' string. In AFTER, the conditional compilation was removed and only the NET8_0_OR_GREATER branch (using MediaTypeNames.Text.Markdown) remains unconditionally. If this library still targets older frameworks without NET8_0_OR_GREATER, this could be a compile-time issue, but assuming the upgrade now targets .NET 8+ only, the observable behavior (content type value) should be the same as the previously conditional branch for NET8_0_OR_GREATER, and this is a reasonable simplification given the dependency/target framework upgrage. The underlying value of MediaTypeNames.Text.Markdown is 'text/markdown', consistent with the behavior used in the newer branch.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-stream-async-30e32045**: WHEN a caller invokes WriteStreamAsync, the StreamingExtensions SHALL write the given stream's contents to the HTTP response body asynchronously, optionally honoring HTTP range requests.
+  - Acceptance criteria:
+    - AC1: WHEN WriteStreamAsync runs, the StreamingExtensions SHALL call ValidatePreconditions, PreconditionFailedResponse, NotModifiedResponse, WriteStreamToBodyAsync and SetHttpHeader (+1 more).
+    - AC2: WHEN WriteStreamAsync completes normally, the StreamingExtensions SHALL return Some ctx.
+    - AC3: WHEN WriteStreamAsync is invoked, the StreamingExtensions SHALL accept ctx, enableRangeProcessing, stream, eTag and option (+1 more) as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-write-stream-body-async-88cfefda**: WHEN a caller invokes WriteStreamToBodyAsync, the StreamingExtensions SHALL write the given stream's contents directly to the HTTP response body asynchronously without range processing.
+  - Acceptance criteria:
+    - AC1: WHEN WriteStreamToBodyAsync runs, the StreamingExtensions SHALL call RangeUnit and SetHttpHeader.
+    - AC2: WHEN WriteStreamToBodyAsync completes normally, the StreamingExtensions SHALL return Some ctx.
+    - AC3: WHEN WriteStreamToBodyAsync is invoked, the StreamingExtensions SHALL accept ctx, stream, rangeBoundary and option as input.
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **FR-write-string-async-b43bafa2**: WHEN a caller invokes WriteStringAsync, the HttpContextExtensions SHALL write the given string to the HTTP response body asynchronously using the specified content type.
+  - Acceptance criteria:
+    - AC1: WHEN WriteStringAsync runs, the HttpContextExtensions SHALL call WriteBytesAsync.
+    - AC2: WHEN WriteStringAsync completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN WriteStringAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and str of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for WriteStringAsync are identical, with no changes to implementation or behavior.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-text-async-e80cbee9**: WHEN a caller invokes WriteTextAsync, the HttpContextExtensions SHALL write the given string to the HTTP response body asynchronously with the plain text content type.
+  - Acceptance criteria:
+    - AC1: WHEN WriteTextAsync completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC2: WHEN WriteTextAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and str of type string.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for WriteTextAsync are identical, with no changes to implementation or behavior.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **FR-write-xml-async-51a6ea7f**: WHEN a caller invokes WriteXmlAsync, the HttpContextExtensions SHALL serialize the given object to XML and write it to the HTTP response body asynchronously with the XML content type.
+  - Acceptance criteria:
+    - AC1: WHEN WriteXmlAsync runs, the HttpContextExtensions SHALL call GetXmlSerializer.
+    - AC2: WHEN WriteXmlAsync completes normally, the HttpContextExtensions SHALL return a value of type member.
+    - AC3: WHEN WriteXmlAsync is invoked, the HttpContextExtensions SHALL accept ctx of type HttpContext and dataObj of type obj.
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The BEFORE and AFTER code for WriteXmlAsync are identical, with no changes to implementation or behavior.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **NFR-COMPATIBILITY-ae6b810f**: WHEN GetHostingEnvironment or invalidHttpVersion interacts with a versioned runtime, SDK or protocol, the system SHALL remain compatible with its declared runtime and protocol versions.
+  - Acceptance criteria:
+    - AC1: WHEN Giraffe.HttpContextExtensions.GetHostingEnvironment interacts with a versioned runtime, SDK or protocol, the system SHALL honour the declared runtime and protocol versions (evidence: version in Giraffe.HttpContextExtensions.GetHostingEnvironment, HttpContextExtensions.fs:66).
+    - AC2: WHEN Giraffe.HttpStatusCodeHandlers.ServerErrors.invalidHttpVersion interacts with a versioned runtime, SDK or protocol, the system SHALL honour the declared runtime and protocol versions (evidence: invalidHttpVersion in Giraffe.HttpStatusCodeHandlers.ServerErrors.invalidHttpVersion, HttpStatusCodeHandlers.fs:103).
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The code shown for GetHostingEnvironment and invalidHttpVersion is byte-for-byte identical between BEFORE and AFTER, including the obsolete attribute and status code handling. No behavioural change is evident.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **NFR-OBSERVABILITY-9f46ce8c**: WHEN safeRedirectToExt, validateCsrfTokenExt, GetLogger or another supporting component handles a request or an error, the system SHALL emit logs, metrics, or traces for its operations.
+  - Acceptance criteria:
+    - AC1: WHEN an operation configured by Giraffe.Core.TRACE handles a request or an error, the system SHALL emit logs, metrics or traces (evidence: TRACE in Giraffe.Core.TRACE, Core.fs:175).
+    - AC2: WHEN Giraffe.Core.safeRedirectToExt is invoked, the system SHALL record a warning-level log entry (evidence: logger.LogWarning in Giraffe.Core.safeRedirectToExt, Core.fs:295).
+    - AC3: WHEN Giraffe.Csrf.validateCsrfTokenExt is invoked, the system SHALL record a warning-level log entry (evidence: logger.LogWarning in Giraffe.Csrf.validateCsrfTokenExt, Csrf.fs:54).
+    - AC4: WHEN Giraffe.Csrf.validateCsrfTokenExt is invoked, the system SHALL record a warning-level log entry (evidence: logger.LogWarning in Giraffe.Csrf.validateCsrfTokenExt, Csrf.fs:68).
+    - AC5: WHEN an operation configured by Giraffe.EndpointRouting.Routers.TRACE handles a request or an error, the system SHALL emit logs, metrics or traces (evidence: TRACE in Giraffe.EndpointRouting.Routers.TRACE, EndpointRouting.fs:262).
+    - AC6: WHEN Giraffe.HttpContextExtensions.GetLogger, Giraffe.Middleware.GiraffeMiddleware.Invoke or Giraffe.Middleware.GiraffeErrorHandlerMiddleware.Invoke handles a request or an error, the system SHALL emit logs, metrics or traces (evidence: GetLogger in Giraffe.HttpContextExtensions.GetLogger, HttpContextExtensions.fs:62; logger.LogDebug in Giraffe.Middleware.GiraffeMiddleware.Invoke, Middleware.fs:40; logger.LogError in Giraffe.Middleware.GiraffeErrorHandlerMiddleware.Invoke, Middleware.fs:75; logger.LogError in Giraffe.Middleware.GiraffeErrorHandlerMiddleware.Invoke, Middleware.fs:77).
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: All logging/tracing code (safeRedirectToExt warnings, validateCsrfTokenExt warnings, GetLogger, middleware debug/error logging) is unchanged between BEFORE and AFTER. No differences in log emission behaviour are present.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
+- **NFR-PERFORMANCE-6936d350**: WHEN gatewayTimeout or GATEWAY_TIMEOUT waits on a resource or dependency, the system SHALL bound resource use with timeouts, rate limits, or concurrency controls.
+  - Acceptance criteria:
+    - AC1: WHEN Giraffe.HttpStatusCodeHandlers.ServerErrors.gatewayTimeout waits on a resource or dependency, the system SHALL bound the wait with a timeout, rate limit or concurrency control (evidence: gatewayTimeout in Giraffe.HttpStatusCodeHandlers.ServerErrors.gatewayTimeout, HttpStatusCodeHandlers.fs:100).
+    - AC2: WHEN Giraffe.HttpStatusCodeHandlers.ServerErrors.GATEWAY_TIMEOUT waits on a resource or dependency, the system SHALL bound the wait with a timeout, rate limit or concurrency control (evidence: GATEWAY_TIMEOUT in Giraffe.HttpStatusCodeHandlers.ServerErrors.GATEWAY_TIMEOUT, HttpStatusCodeHandlers.fs:101).
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **NFR-PERFORMANCE-92c573e7**: WHEN cacheHeader, an operation of CacheDirective, an operation configured by noCacheHeader or another supporting component serves repeated or bulk work, the system SHALL use caching or batching to bound response latency.
+  - Acceptance criteria:
+    - AC1: WHEN an operation of Giraffe.ResponseCaching.CacheDirective serves repeated or bulk work, the system SHALL use caching or batching (evidence: CacheDirective in Giraffe.ResponseCaching.CacheDirective, ResponseCaching.fs:18).
+    - AC2: WHEN an operation configured by Giraffe.ResponseCaching.noCacheHeader serves repeated or bulk work, the system SHALL use caching or batching (evidence: noCacheHeader in Giraffe.ResponseCaching.noCacheHeader, ResponseCaching.fs:23).
+    - AC3: WHEN Giraffe.ResponseCaching.cacheHeader serves repeated or bulk work, the system SHALL use caching or batching (evidence: cacheHeader in Giraffe.ResponseCaching.cacheHeader, ResponseCaching.fs:25).
+    - AC4: WHEN an operation configured by Giraffe.ResponseCaching.noResponseCaching serves repeated or bulk work, the system SHALL use caching or batching (evidence: NoCache in Giraffe.ResponseCaching.noResponseCaching, ResponseCaching.fs:75).
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **NFR-SECURITY-4d0f2503**: WHEN a caller invokes challenge, signOut, authorizeRequest or another supporting component, the system SHALL authenticate and authorize access to protected operations.
+  - Acceptance criteria:
+    - AC1: WHEN a caller invokes an operation configured by Giraffe.Auth, the system SHALL enforce authentication and authorization (evidence: Auth in Giraffe.Auth, Auth.fs:4).
+    - AC2: WHEN a caller invokes Giraffe.Auth.challenge, the system SHALL enforce authentication and authorization (evidence: authScheme in Giraffe.Auth.challenge, Auth.fs:18).
+    - AC3: WHEN a caller invokes Giraffe.Auth.signOut, the system SHALL enforce authentication and authorization (evidence: authScheme in Giraffe.Auth.signOut, Auth.fs:32).
+    - AC4: WHEN a caller invokes Giraffe.Auth.authorizeRequest, the system SHALL enforce authentication and authorization (evidence: authorizeRequest in Giraffe.Auth.authorizeRequest, Auth.fs:47).
+    - AC5: WHEN a caller invokes Giraffe.Auth.evaluateUserPolicy, the system SHALL enforce authentication and authorization (evidence: authFailedHandler in Giraffe.Auth.evaluateUserPolicy, Auth.fs:62).
+    - AC6: WHEN a caller invokes an operation configured by Giraffe.Auth.authorizeUser, Giraffe.Auth.requiresAuthentication, Giraffe.Auth.requiresRole, Giraffe.Auth.requiresRoleOf or Giraffe.Auth.authorizeByPolicyName (+10 more), the system SHALL enforce authentication and authorization (evidence: authorizeUser in Giraffe.Auth.authorizeUser, Auth.fs:69; authFailedHandler in Giraffe.Auth.requiresAuthentication, Auth.fs:76; authFailedHandler in Giraffe.Auth.requiresRole, Auth.fs:87; authFailedHandler in Giraffe.Auth.requiresRoleOf, Auth.fs:96; authorizeByPolicyName in Giraffe.Auth.authorizeByPolicyName, Auth.fs:107 (+10 more)).
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **NFR-SECURITY-742b03ce**: WHEN sensitive data is handled by signOut, the system SHALL protect data in transit and at rest using cryptographic controls.
+  - Acceptance criteria:
+    - AC1: WHEN sensitive data is handled by Giraffe.Auth.signOut, the system SHALL apply cryptographic protection (evidence: signOut in Giraffe.Auth.signOut, Auth.fs:32).
+  - Verdict: satisfied (evidence: unchanged)
+  - Reasoning: The implementing code did not change between the pre- and post-upgrade codebase, so the behaviour is preserved by construction.
+  - Caveat: Not executed at runtime; rests on the implementing location being unchanged, not on a passing test.
+- **NFR-SECURITY-77058ab1**: WHEN untrusted input reaches httpVerb, validateCsrfTokenExt, generateCsrfToken or another supporting component, the system SHALL validate and sanitize untrusted input before use.
+  - Acceptance criteria:
+    - AC1: WHEN untrusted input reaches Giraffe.Core.httpVerb, the system SHALL validate or sanitize the input before use (evidence: validate in Giraffe.Core.httpVerb, Core.fs:157).
+    - AC2: WHEN untrusted input reaches an operation configured by Giraffe.Csrf, the system SHALL validate or sanitize the input before use (evidence: Csrf in Giraffe.Csrf, Csrf.fs:8).
+    - AC3: WHEN untrusted input reaches an operation configured by Giraffe.Csrf.DefaultCsrfTokenHeaderName, the system SHALL validate or sanitize the input before use (evidence: DefaultCsrfTokenHeaderName in Giraffe.Csrf.DefaultCsrfTokenHeaderName, Csrf.fs:23).
+    - AC4: WHEN untrusted input reaches an operation configured by Giraffe.Csrf.DefaultCsrfTokenFormFieldName, the system SHALL validate or sanitize the input before use (evidence: DefaultCsrfTokenFormFieldName in Giraffe.Csrf.DefaultCsrfTokenFormFieldName, Csrf.fs:29).
+    - AC5: WHEN untrusted input reaches Giraffe.Csrf.validateCsrfTokenExt, the system SHALL validate or sanitize the input before use (evidence: validateCsrfTokenExt in Giraffe.Csrf.validateCsrfTokenExt, Csrf.fs:39).
+    - AC6: WHEN untrusted input reaches an operation configured by Giraffe.Csrf.validateCsrfToken, an operation configured by Giraffe.Csrf.requireAntiforgeryToken, an operation configured by Giraffe.Csrf.requireAntiforgeryTokenExt, Giraffe.Csrf.generateCsrfToken or Giraffe.Csrf.csrfTokenJson (+13 more), the system SHALL validate or sanitize the input before use (evidence: validateCsrfToken in Giraffe.Csrf.validateCsrfToken, Csrf.fs:84; requireAntiforgeryToken in Giraffe.Csrf.requireAntiforgeryToken, Csrf.fs:89; requireAntiforgeryTokenExt in Giraffe.Csrf.requireAntiforgeryTokenExt, Csrf.fs:94; generateCsrfToken in Giraffe.Csrf.generateCsrfToken, Csrf.fs:103; csrfTokenJson in Giraffe.Csrf.csrfTokenJson, Csrf.fs:123 (+13 more)).
+  - Verdict: satisfied (evidence: judge-preserved)
+  - Reasoning: Behaviour judge (confidence: high) ruled the change behaviour-preserving: The httpVerb validation logic and the CSRF token validation/sanitization logic (validateCsrfTokenExt, generateCsrfToken) are identical in BEFORE and AFTER snippets, with no changes to validation flow, antiforgery checks, or error handling.
+  - Judge confidence: high
+  - Caveat: Static behavioural judgement of the before/after implementation, not an executed test.
