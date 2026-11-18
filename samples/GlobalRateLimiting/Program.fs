@@ -30,7 +30,7 @@ let configureServices (services: IServiceCollection) =
                                 AutoReplenishment = true,
                                 PermitLimit = 10,
                                 QueueLimit = 0,
-                                Window = TimeSpan.FromSeconds(1)
+                                Window = TimeSpan.FromSeconds(int64 1)
                             )
                         )
                 )
