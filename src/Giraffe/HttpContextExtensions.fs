@@ -519,11 +519,7 @@ type HttpContextExtensions() =
     /// <returns>Task of Some HttpContext after writing to the body of the response.</returns>
     [<Extension>]
     static member WriteMarkdownAsync(ctx: HttpContext, markdown: string) =
-#if NET8_0_OR_GREATER
         ctx.SetContentType(System.Net.Mime.MediaTypeNames.Text.Markdown + "; charset=utf-8")
-#else
-        ctx.SetContentType "text/markdown; charset=utf-8"
-#endif
         ctx.WriteStringAsync markdown
 
     /// <summary>

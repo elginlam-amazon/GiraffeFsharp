@@ -8,7 +8,7 @@
     <NeutralLanguage>en-GB</NeutralLanguage>
 
     <!-- Build settings -->
-    <TargetFrameworks>net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <TargetFrameworks>net10.0</TargetFrameworks>
     <DebugType>portable</DebugType>
     <OutputType>Library</OutputType>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -75,9 +75,9 @@
     </PackageReference>
 
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="4.0.*" />
-    <PackageReference Include="System.Text.Json" Version="8.0.*" />
+    <!-- System.Text.Json ships in the net10.0 shared framework, so it is not referenced explicitly (NU1510). -->
     <PackageReference Include="FSharp.SystemTextJson" Version="1.3.*" />
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.*" PrivateAssets="All" />
+    <!-- SourceLink is built into the .NET SDK; the standalone Microsoft.SourceLink.GitHub package is no longer referenced. -->
     <PackageReference Include="Giraffe.ViewEngine" Version="1.4.*" />
   </ItemGroup>
 
