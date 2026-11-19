@@ -586,11 +586,7 @@ module Core =
     let markdown (markdown: string) : HttpHandler =
         let bytes = Encoding.UTF8.GetBytes markdown
 
-#if NET8_0_OR_GREATER
         let contentType = System.Net.Mime.MediaTypeNames.Text.Markdown + "; charset=utf-8"
-#else
-        let contentType = "text/markdown; charset=utf-8"
-#endif
 
         fun (_: HttpFunc) (ctx: HttpContext) ->
             ctx.SetContentType contentType
