@@ -95,7 +95,6 @@ let createHost
     (configureServices: IServiceCollection -> unit)
     (args: 'Tuple)
     =
-#if NET10_0_OR_GREATER
     HostBuilder()
         .ConfigureWebHost(fun webHostBuilder ->
             webHostBuilder
@@ -105,12 +104,6 @@ let createHost
                 .ConfigureServices(Action<IServiceCollection> configureServices)
             |> ignore
         )
-#else
-    (WebHostBuilder())
-        .UseContentRoot(Path.GetFullPath("TestFiles"))
-        .Configure(Action<IApplicationBuilder>(configureApp args))
-        .ConfigureServices(Action<IServiceCollection> configureServices)
-#endif
 
 let mockJson (ctx: HttpContext) =
 
@@ -144,15 +137,11 @@ let createRequest (method: HttpMethod) (path: string) =
 
 let makeRequest configureApp configureServices args (request: HttpRequestMessage) =
     task {
-#if NET10_0_OR_GREATER
         // https://github.com/aspnet/Announcements/issues/526
         use host = createHost configureApp configureServices args |> _.Build()
 
         let! _ = host.StartAsync()
         use server = host.GetTestServer()
-#else
-        use server = new TestServer(createHost configureApp configureServices args)
-#endif
         use client = server.CreateClient()
         let! response = request |> client.SendAsync
         return response
